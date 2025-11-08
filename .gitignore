@@ -51,8 +51,6 @@ models/*/model.safetensors
 # Data files (can be large)
 data/raw/*.csv
 data/raw/*.json
-data/processed/*.csv
-data/processed/*.json
 *.h5
 *.hdf5
 

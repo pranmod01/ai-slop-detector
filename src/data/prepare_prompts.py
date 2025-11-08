@@ -81,8 +81,8 @@ def prepare_feature_dataset(df, output_path, feature):
 
 if __name__ == "__main__":
     # Load original splits
-    train_df_full = pd.read_csv('data/processed/train.csv')
-    test_df = pd.read_csv('data/processed/test.csv')
+    train_df_full = pd.read_csv('data/processed/train_clean.csv')
+    test_df = pd.read_csv('data/processed/train_clean.csv')
     
     # Create train/val split from training data
     train_df, val_df = create_splits(train_df_full, val_size=0.15)
