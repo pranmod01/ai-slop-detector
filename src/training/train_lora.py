@@ -1,163 +1,128 @@
+# src/training/train_lora.py
+
+import os
 import argparse
 import torch
-from datasets import load_dataset
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling
-)
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+import time
 import json
+import subprocess
+from dataclasses import dataclass, field
+from datasets import load_dataset
+from peft import LoraConfig
+from transformers import AutoTokenizer, set_seed
+from huggingface_hub import login
+from optimum.neuron import NeuronHfArgumentParser as HfArgumentParser
+from optimum.neuron import NeuronSFTConfig, NeuronSFTTrainer, NeuronTrainingArguments
+from optimum.neuron.models.training import NeuronModelForCausalLM
+from torch_xla.core.xla_model import is_master_ordinal
 
-def preprocess_function(examples, tokenizer, max_length=1536):
-    """Tokenize prompts and completions"""
-    # Combine prompt + completion for training
-    full_texts = [
-        p + c for p, c in zip(examples['prompt'], examples['completion'])
-    ]
-    
-    # Tokenize
-    tokenized = tokenizer(
-        full_texts,
-        truncation=True,
-        max_length=max_length,
-        padding=False  # We'll pad in collator
-    )
-    
-    # Create labels (same as input_ids for causal LM)
-    tokenized['labels'] = tokenized['input_ids'].copy()
-    
-    return tokenized
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def main(args):
-    print(f"\n{'='*60}")
-    print(f"Training Agent: {args.feature}")
-    print(f"{'='*60}\n")
-    
-    # 1. Load tokenizer and model
-    print("Loading base model...")
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.base_model,
-        trust_remote_code=True
-    )
-    
-    # Set pad token if not present
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    
-    model = AutoModelForCausalLM.from_pretrained(
-        args.base_model,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=True
-    )
-    
-    # 2. Prepare model for LoRA training
-    print("Setting up LoRA...")
-    model = prepare_model_for_kbit_training(model)
-    
-    lora_config = LoraConfig(
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-        lora_dropout=args.lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM"
-    )
-    
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-    
-    # 3. Load dataset
-    print(f"Loading {args.feature} dataset...")
+def log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+def get_secret(secret_name, region_name):
+    try:
+        session = boto3.session.Session()
+        client = session.client(service_name='secretsmanager', region_name=region_name)
+        paginator = client.get_paginator('list_secrets')
+        for page in paginator.paginate():
+            for secret in page['SecretList']:
+                if secret['Name'].startswith(secret_name):
+                    response = client.get_secret_value(SecretId=secret['ARN'])
+                    if 'SecretString' in response:
+                        return response['SecretString']
+        return None
+    except Exception:
+        return None
+
+def create_conversation(sample):
+    return {
+        "messages": [
+            {"role": "user", "content": sample['prompt']},
+            {"role": "assistant", "content": sample['completion']}
+        ]
+    }
+
+def training_function(script_args, training_args):
+    log(f"Training Agent: {script_args.feature}")
+
+    # Load datasets
     dataset = load_dataset(
         'json',
         data_files={
-            'train': f'data/prompts/{args.feature}_train.jsonl',
-            'test': f'data/prompts/{args.feature}_test.jsonl'
+            'train': f'data/prompts/{script_args.feature}_train.jsonl',
+            'validation': f'data/prompts/{script_args.feature}_val.jsonl',
         }
     )
-    
-    # 4. Tokenize
-    print("Tokenizing...")
-    tokenized_dataset = dataset.map(
-        lambda x: preprocess_function(x, tokenizer, args.max_length),
-        batched=True,
-        remove_columns=dataset['train'].column_names
+    train_dataset = dataset['train'].map(create_conversation, remove_columns=dataset['train'].column_names)
+    eval_dataset = dataset['validation'].map(create_conversation, remove_columns=dataset['validation'].column_names)
+
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(script_args.tokenizer_id, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Load model
+    dtype = torch.bfloat16 if training_args.bf16 else torch.float32
+    model = NeuronModelForCausalLM.from_pretrained(script_args.model_id, training_args.trn_config, torch_dtype=dtype)
+
+    # Configure LoRA
+    lora_config = LoraConfig(
+        r=script_args.lora_r,
+        lora_alpha=script_args.lora_alpha,
+        lora_dropout=script_args.lora_dropout,
+        target_modules=["q_proj", "gate_proj", "v_proj", "o_proj", "k_proj", "up_proj", "down_proj"],
+        bias="none",
+        task_type="CAUSAL_LM",
     )
-    
-    # 5. Training arguments
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        num_train_epochs=args.epochs,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        gradient_accumulation_steps=args.grad_accum,
-        learning_rate=args.lr,
-        bf16=True,  # Use bfloat16 for Trainium
-        logging_steps=50,
-        save_strategy="epoch",
-        evaluation_strategy="epoch",
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        report_to="none",  # Disable wandb for hackathon
-        dataloader_num_workers=4,
+
+    # SFT Config
+    sft_config = NeuronSFTConfig(
+        max_seq_length=script_args.max_seq_length,
+        packing=True,
+        **training_args.to_dict(),
+        dataset_kwargs={"add_special_tokens": False, "append_concat_token": True},
     )
-    
-    # 6. Data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False  # Causal LM, not masked LM
-    )
-    
-    # 7. Trainer
-    trainer = Trainer(
+
+    # Trainer
+    trainer = NeuronSFTTrainer(
+        args=sft_config,
         model=model,
-        args=training_args,
-        train_dataset=tokenized_dataset['train'],
-        eval_dataset=tokenized_dataset['test'],
-        data_collator=data_collator,
+        peft_config=lora_config,
+        tokenizer=tokenizer,
+        train_dataset=train_dataset,
     )
-    
-    # 8. Train
-    print("\nStarting training...")
+
+    log("Starting training...")
     trainer.train()
-    
-    # 9. Save adapter
-    print(f"\nSaving adapter to {args.output_dir}")
-    model.save_pretrained(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
-    
-    # Save training args for reference
-    with open(f"{args.output_dir}/training_config.json", 'w') as f:
-        json.dump(vars(args), f, indent=2)
-    
-    print(f"\n✓ Agent '{args.feature}' training complete!")
-    print(f"  Saved to: {args.output_dir}")
+    log("Training complete!")
+
+    # Save model and tokenizer
+    model.save_pretrained(training_args.output_dir)
+    tokenizer.save_pretrained(training_args.output_dir)
+    with open(f"{training_args.output_dir}/training_config.json", 'w') as f:
+        json.dump(vars(script_args), f, indent=2)
+
+@dataclass
+class ScriptArguments:
+    model_id: str = field(default="Qwen/Qwen2.5-1.5B-Instruct")
+    tokenizer_id: str = field(default="Qwen/Qwen2.5-1.5B-Instruct")
+    feature: str = field(default="stylistic")
+    max_seq_length: int = field(default=1024)
+    lora_r: int = field(default=16)
+    lora_alpha: int = field(default=32)
+    lora_dropout: float = field(default=0.05)
+    secret_name: str = field(default="huggingface/token")
+    secret_region: str = field(default="us-west-2")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    
-    # Model args
-    parser.add_argument("--base_model", default="Qwen/Qwen2.5-1.5B-Instruct")
-    parser.add_argument("--feature", required=True, 
-                       choices=["stylistic", "syntactic", "semantic", "repetition"])
-    parser.add_argument("--output_dir", required=True)
-    
-    # Training args
-    parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--grad_accum", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--max_length", type=int, default=1536)
-    
-    # LoRA args
-    parser.add_argument("--lora_r", type=int, default=16)
-    parser.add_argument("--lora_alpha", type=int, default=32)
-    parser.add_argument("--lora_dropout", type=float, default=0.05)
-    
-    args = parser.parse_args()
-    main(args)
+    parser = HfArgumentParser([ScriptArguments, NeuronTrainingArguments])
+    script_args, training_args = parser.parse_args_into_dataclasses()
+
+    hf_token = os.environ.get("HF_TOKEN") or get_secret(script_args.secret_name, script_args.secret_region)
+    if hf_token:
+        login(token=hf_token)
+
+    set_seed(training_args.seed)
+    training_function(script_args, training_args)
