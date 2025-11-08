@@ -1,0 +1,11 @@
+numpy
+pandas
+matplotlib
+seaborn
+transformers 
+datasets==3.6.0 
+torch 
+peft 
+accelerate
+streamlit 
+scikit-learn
