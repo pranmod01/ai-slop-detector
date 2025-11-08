@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# Models and datasets (large files)
+models/*/checkpoint-*/
+models/*/pytorch_model.bin
+models/*/model.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Data files (can be large)
+data/raw/*.csv
+data/raw/*.json
+data/processed/*.csv
+data/processed/*.json
+*.h5
+*.hdf5
+
+# Keep structure but ignore content
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Logs and outputs
+logs/
+*.log
+wandb/
+runs/
+outputs/
+
+# OS specific
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Evaluation results
+evaluation/results/
+evaluation/plots/
+
+# Keep certain files
+!.gitkeep

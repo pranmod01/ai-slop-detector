@@ -1,11 +1,24 @@
-numpy
-pandas
-matplotlib
-seaborn
-transformers 
-datasets==3.6.0 
-torch 
-peft 
-accelerate
-streamlit 
-scikit-learn
+# Core ML/DL frameworks
+torch==2.8.0
+transformers==4.57.1
+datasets==3.6.0
+accelerate==1.11.0
+peft==0.17.1
+
+# Data processing
+numpy==1.26.4
+pandas==2.3.3
+
+# Visualization
+matplotlib==3.10.7
+seaborn==0.13.2
+
+# Machine Learning utilities
+scikit-learn==1.7.2
+
+# Web interface
+streamlit==1.51.0
+
+# Utilities
+tqdm==4.67.1
+safetensors==0.6.2
