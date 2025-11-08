@@ -53,10 +53,10 @@ if __name__ == "__main__":
     df = dataset['train'].to_pandas()
 
     # Save the full raw dataset
-    df.to_csv('/home/ubuntu/environment/ai-slop-detector/data/hc3.csv', index=False)
+    df.to_csv('/home/ubuntu/environment/ai-slop-detector/data/raw/hc3.csv', index=False)
 
     # Cut into train and test sets
-    train, test = train_test_split(df, test_size=0.2, random_state=42)
+    train, test = train_test_split(df, test_size=0.15, random_state=42)
 
     # Process and save
     train_df = process_hc3_to_binary(train)
