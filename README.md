@@ -1,36 +1,28 @@
-# Multi-Agent AI Slop Detector using Specialized SLMs on AWS Trainium
-AI-generated "slop" is drowning the internet. Generic product reviews, formulaic blog posts, repetitive social media bots—low-quality AI content is everywhere, degrading trust and information quality online.
+# Multi-Agent SLM Evaluators for AI Slop Detection
 
-Traditional detection fails because it's a black box. Users don't know why content was flagged, making it hard to trust or contest decisions.
+Built for [AWS Small Language Build Day Hackathon](https://app.agihouse.org/events/smalllanguagemodel-20251108)
 
-Four small language models (1-3B params each) working together to detect low-quality AI-generated content:
-- Agent 1: Genericity Detector (spots vague, could-be-anything language)
-- Agent 2: Substance Analyzer (measures information density vs fluff)
-- Agent 3: Style Analyzer (identifies characteristic AI phrases and patterns)
-- Agent 4: Repetition Detector (finds formulaic structure)
+We’re building small language models (SLMs) to detect what we call AI slop — incoherent or low-fidelity model outputs that pass naive quality filters. The goal is to determine whether lightweight evaluators can act as early warning systems for generation failure, catching low-quality outputs before they reach expensive moderation or post-processing stages.
 
-Each agent is fine-tuned with LoRA on a specific aspect, then ensemble voting produces final verdict. Project completed through [AWS Small Language Build Day Hackathon](https://app.agihouse.org/events/smalllanguagemodel-20251108)
+This project explores the frontier between language model evaluation and interpretability—testing whether small, specialized models can serve as auditors for generative pipelines, not just classifiers of human vs AI text.
 
-## Why use SLMs?
-- Interpretability: Users see exactly which signals fired (not just "AI detected")
-- Robustness: Harder to fool multiple specialists than one generalist
-- Efficiency: 4 small models cost less to run than 1 large model
-- AI Safety: Transparent, auditable decisions for high-stakes content moderation
-- Cost: ~10x cheaper than GPT-4 API for detection at scale
+## Approach
+Four SLMs (1–3B parameters) act as specialized evaluators, each fine-tuned with LoRA adapters on a specific signal:
+- Genericity Detector: spots vague, semantically thin language
+- Substance Analyzer: measures information density and topical grounding
+- Style Analyzer: captures characteristic rhythm and lexical regularity of synthetic text
+- Repetition Detector: flags templated or autoregressive artifacts
 
-## Tech Stack
-Infrastructure:
-- AWS Trainium (trn1.2xlarge) - Purpose-built AI training chips
-- Neuron SDK - Hardware optimization for efficient training
+Each model is trained on synthetic noisy generations and evaluated for cross-model generalization across model families (e.g., GPT vs Qwen). We’re probing whether the strongest discriminative signals come from token-level entropy or longer-range syntactic structure, using ensemble voting to integrate their judgments.
 
-Models:
-- Base: Qwen 2.5 (1.5B parameters)
--4 LoRA adapters - Parameter-efficient fine-tuning (~5MB each vs 1.5GB full model)
+## Technical Stack
+- Compute: AWS Trainium (trn1.2xlarge) with Neuron SDK optimization
+- Models: Qwen 2.5 (1.5B) + 4 LoRA adapters (~5MB each)
+- Framework: PyTorch + Transformers + PEFT
+- Dataset: HC3 + synthetic noisy generations
 
-Dataset: HC3 (Human vs ChatGPT comparison corpus)
-
-Framework:
-- PyTorch + Transformers + PEFT
-- LoRA for efficient specialization
-- Ensemble voting for robust detection
-
+## Why SLMs?
+- Interpretability: Specialized evaluators reveal which signals drive decisions
+- Efficiency: Small models enable near real-time content evaluation
+- Safety: Transparent detection pipeline for trustable model monitoring
+- Scalability: 10× cheaper than large-model inference for continuous quality checks
