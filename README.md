@@ -1,4 +1,8 @@
 # Multi-Agent AI Slop Detector using Specialized SLMs on AWS Trainium
+AI-generated "slop" is drowning the internet. Generic product reviews, formulaic blog posts, repetitive social media bots—low-quality AI content is everywhere, degrading trust and information quality online.
+
+Traditional detection fails because it's a black box. Users don't know why content was flagged, making it hard to trust or contest decisions.
+
 Four small language models (1-3B params each) working together to detect low-quality AI-generated content:
 - Agent 1: Genericity Detector (spots vague, could-be-anything language)
 - Agent 2: Substance Analyzer (measures information density vs fluff)
